@@ -21,7 +21,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 audio_model = AudioTagging(checkpoint_path=None, device=device)
 
 # Loading the trained classifier 
-sound_clf = load("**/classifier.pkl")  
+sound_clf = load("models/classifier.pkl")  
 LABELS = ['scratch', 'cough', 'crying sobbing wail', 'screaming', 'rub', 'sneeze', 'sniff', 'stone rock', 'whispering', 'whistling']
 
 # --- Audio Helper Functions ---
@@ -43,12 +43,13 @@ def predict_sound(path: str) -> str:
     return LABELS[idx]
 
 
-# Load YOLO model (use yolov8x.pt for best accuracy)
+# Load YOLO model (used yolov8x.pt for best accuracy)
 model = YOLO('yolov8x.pt')
 
 
-st.title("YOLO People Detector")
-st.write("Upload one or more images. The app will detect if there are people in each image using YOLO and show the results ranked by confidence.")
+# --- Streamlit UI ---
+st.title("Multimodal Detector: Image & Audio")
+st.write("Upload an image or an audio clip to classify. The app will detect if there are people in each image using YOLO and show the results ranked by confidence.")
 
 uploaded_files = st.file_uploader(
     "Upload images", type=["png", "jpg", "jpeg", "bmp", "webp"], accept_multiple_files=True
@@ -115,3 +116,20 @@ if uploaded_files:
                 st.warning("No people detected.")
 else:
     st.info("Please upload one or more images to begin.") 
+
+
+# Audio Classification Section (updated)
+st.header("Audio Classification")
+audio_file = st.file_uploader(
+    "Upload an audio file (wav, mp3, ogg, flac)",
+    type=["wav","mp3","ogg","flac"]
+)
+if audio_file:
+    # Convert any uploaded format to WAV for consistency
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        AudioSegment.from_file(audio_file).export(tmp.name, format="wav")
+        # Run prediction
+        pred = predict_sound(tmp.name)
+    st.success(f"Predicted sound category: **{pred}**")
+else:
+    st.info("Upload an audio clip to classify the sound category.")
