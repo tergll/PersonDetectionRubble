@@ -10,6 +10,20 @@ import cv2
 import torch
 import librosa
 import numpy as np
+
+import os, urllib.request
+
+data_dir = os.path.expanduser('~/panns_data')
+os.makedirs(data_dir, exist_ok=True)
+csv_path = os.path.join(data_dir, 'class_labels_indices.csv')
+if not os.path.isfile(csv_path):
+    urllib.request.urlretrieve(
+        "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/class_labels_indices.csv",
+        csv_path
+    )
+
+
+
 from panns_inference import AudioTagging
 from joblib import load
 from pydub import AudioSegment
