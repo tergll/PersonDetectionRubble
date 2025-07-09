@@ -15,8 +15,37 @@ from joblib import load
 from pydub import AudioSegment
 import tempfile
 
+
+# Load PANNs audio tagging model
+device = "cuda" if torch.cuda.is_available() else "cpu"
+audio_model = AudioTagging(checkpoint_path=None, device=device)
+
+# Loading the trained classifier 
+sound_clf = load("**/classifier.pkl")  
+LABELS = ['scratch', 'cough', 'crying sobbing wail', 'screaming', 'rub', 'sneeze', 'sniff', 'stone rock', 'whispering', 'whistling']
+
+# --- Audio Helper Functions ---
+def extract_embedding(path: str) -> np.ndarray:
+    # Load audio, resample to mono @32kHz
+    wav, sr = librosa.load(path, sr=32000, mono=True)
+    # Normalize amplitude
+    wav = wav / np.max(np.abs(wav))
+    # Batch dimension
+    tensor = torch.tensor(wav, device=device).unsqueeze(0)
+    # Inference: returns (clip_output, embedding)
+    _, embedding = audio_model.inference(tensor)
+    return embedding.squeeze()
+
+
+def predict_sound(path: str) -> str:
+    emb = extract_embedding(path).reshape(1, -1)
+    idx = int(sound_clf.predict(emb)[0])
+    return LABELS[idx]
+
+
 # Load YOLO model (use yolov8x.pt for best accuracy)
 model = YOLO('yolov8x.pt')
+
 
 st.title("YOLO People Detector")
 st.write("Upload one or more images. The app will detect if there are people in each image using YOLO and show the results ranked by confidence.")
