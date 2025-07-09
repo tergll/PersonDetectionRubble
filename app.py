@@ -6,6 +6,15 @@ import tempfile
 import torch
 import cv2
 
+# --- Audio Dependencies & Model Load ---
+import torch
+import librosa
+import numpy as np
+from panns_inference import AudioTagging
+from joblib import load
+from pydub import AudioSegment
+import tempfile
+
 # Load YOLO model (use yolov8x.pt for best accuracy)
 model = YOLO('yolov8x.pt')
 
