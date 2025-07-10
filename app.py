@@ -121,6 +121,7 @@ if uploaded_files:
 
 # Process images if any
 image_results = []
+image_detected = False  # Global flag for fusion logic
 if image_files:
     st.header("📷 Image Analysis Results")
     for uploaded_file in image_files:
@@ -152,6 +153,7 @@ if image_files:
                         result.boxes = new_boxes
                         max_conf = float(result.boxes.conf.max().cpu().item())
                         has_people = True
+                        image_detected = True  # Set global flag
                     else:
                         result.boxes = None
                         max_conf = 0.0
@@ -186,6 +188,7 @@ if image_files:
                 st.warning("❌ No people detected.")
 
 # Process videos if any
+video_audio_detected = False  # Global flag for video audio detection
 if video_files:
     st.header("🎬 Video Analysis Results")
     for uploaded_file in video_files:
@@ -201,6 +204,10 @@ if video_files:
             
             # Process audio
             pred = predict_sound(audio_path)
+            # Modified audio detection logic to include "scratch" as valid
+            audio_detected = (pred in LABELS)  # Include all labels including "scratch"
+            if audio_detected:
+                video_audio_detected = True  # Set global flag
             st.success(f"🎯 Audio prediction: **{pred}**")
             
             # Extract frames from video
@@ -212,6 +219,7 @@ if video_files:
                 
                 # Process frames with YOLO
                 frame_results = []
+                video_image_detected = False  # Flag for video frame detection
                 for i, (frame, timestamp) in enumerate(zip(frames, timestamps)):
                     # Convert numpy array to PIL Image
                     frame_pil = Image.fromarray(frame)
@@ -239,6 +247,7 @@ if video_files:
                                 result.boxes = new_boxes
                                 max_conf = float(result.boxes.conf.max().cpu().item())
                                 has_people = True
+                                video_image_detected = True  # Set video frame detection flag
                             else:
                                 result.boxes = None
                                 max_conf = 0.0
@@ -271,6 +280,25 @@ if video_files:
                             st.success(f"✅ People detected at {result['timestamp']}s! Confidence: {result['max_conf']*100:.1f}%")
                         else:
                             st.warning(f"❌ No people detected at {result['timestamp']}s")
+                
+                # Fusion logic for video
+                if video_image_detected and audio_detected:
+                    st.success(
+                        "✅ Person **alive** detected in video  " +
+                        f"(vision={'✅' if video_image_detected else '❌'}, audio={'✅' if audio_detected else '❌'})"
+                    )
+                elif video_image_detected and not audio_detected:
+                    st.warning(
+                        "👀 Person detected visually but **no valid sound** → might be dead  " +
+                        f"(vision={'✅'}, audio={'❌'})"
+                    )
+                elif audio_detected and not video_image_detected:
+                    st.info(
+                        "🔊 Valid sound detected but **no person visually** → person might be alive  " +
+                        f"(vision={'❌'}, audio={'✅'})"
+                    )
+                else:
+                    st.error("🚫 No person detected via vision or valid audio.")
             else:
                 st.error("❌ Could not extract frames from video")
             
@@ -280,6 +308,7 @@ if video_files:
 
 # Process audio files if any
 audio_results = []
+audio_detected = False  # Global flag for fusion logic
 if audio_files:
     st.header("🎵 Audio Analysis Results")
     for uploaded_file in audio_files:
@@ -293,6 +322,8 @@ if audio_files:
                 # Run prediction
                 pred = predict_sound(tmp.name)
             
+            # Modified audio detection logic to include "scratch" as valid
+            audio_detected = (pred in LABELS)  # Include all labels including "scratch"
             st.success(f"🎯 Predicted sound category: **{pred}**")
             audio_results.append({
                 "filename": uploaded_file.name,
