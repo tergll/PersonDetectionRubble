@@ -10,6 +10,8 @@ import cv2
 import torch
 import librosa
 import numpy as np
+from pydub import AudioSegment # For audio file handling
+
 
 import os, urllib.request
 
@@ -147,3 +149,59 @@ if audio_file:
     st.success(f"Predicted sound category: **{pred}**")
 else:
     st.info("Upload an audio clip to classify the sound category.")
+
+
+# --- Video Classification Section ---
+st.header("Video Classification")
+video_file = st.file_uploader(
+    "Upload a video file (mp4, avi, mov, mkv, flv)",
+    type=["mp4", "avi", "mov", "mkv", "flv"]
+)
+
+if video_file:
+    # 1️⃣ Save to temp file
+    tfile = tempfile.NamedTemporaryFile(suffix="." + video_file.name.split(".")[-1], delete=False)
+    tfile.write(video_file.read())
+    video_path = tfile.name
+
+    # 2️⃣ Vision pass: scan frames for a person
+    cap = cv2.VideoCapture(video_path)
+    image_detected = False
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # run YOLO
+        results = model(frame)[0]  
+        # check for class 0 (person)
+        for cls, conf in zip(results.boxes.cls, results.boxes.conf):
+            if int(cls) == 0 and conf > 0.0:
+                image_detected = True
+                break
+        if image_detected:
+            break
+    cap.release()
+
+    # 3️⃣ Audio pass: extract and classify
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
+        AudioSegment.from_file(video_path).export(tmp_audio.name, format="wav")
+        audio_pred = predict_sound(tmp_audio.name)
+    # True if the predicted label is one of your defined classes
+    audio_detected = audio_pred in LABELS  
+
+    # 4️⃣ Decision logic
+    if image_detected or audio_detected:
+        st.success(
+            "🔊🔍 Person likely **alive** detected " +
+            (
+                f"(vision={'✔️' if image_detected else '❌'}, "
+                f"audio={'✔️' if audio_detected else '❌'})"
+            )
+        )
+    elif image_detected and not audio_detected:
+        st.warning("🔍 Person detected visually, but **no sound** → person might be dead")
+    else:
+        st.info("No person detected via vision or audio.")
+
+else:
+    st.info("Upload a video file to begin analysis.")
