@@ -152,6 +152,7 @@ else:
 
 
 # --- Video Classification Section ---
+
 st.header("Video Classification")
 video_file = st.file_uploader(
     "Upload a video file (mp4, avi, mov, mkv, flv)",
@@ -159,49 +160,84 @@ video_file = st.file_uploader(
 )
 
 if video_file:
-    # 1️⃣ Save to temp file
-    tfile = tempfile.NamedTemporaryFile(suffix="." + video_file.name.split(".")[-1], delete=False)
-    tfile.write(video_file.read())
-    video_path = tfile.name
+    # 1️⃣ Save video to temp file
+    suffix = "." + video_file.name.split(".")[-1]
+    vid_tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    vid_tmp.write(video_file.read())
+    vid_path = vid_tmp.name
 
-    # 2️⃣ Vision pass: scan frames for a person
-    cap = cv2.VideoCapture(video_path)
+    # 2️⃣ Vision pass: look for person at 1 fps
+    cap = cv2.VideoCapture(vid_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 1       # frames per second
+    sample_rate = int(fps)                     # skip this many frames between samples
+    frame_count = 0
+    annotated_frames = []
     image_detected = False
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        # run YOLO
-        results = model(frame)[0]  
-        # check for class 0 (person)
+        frame_count += 1
+        # only process once every sample_rate frames (i.e., ~1 frame/sec)
+        if frame_count % sample_rate != 0:
+            continue
+
+        results = model(frame)[0]
+        # check for class=0 (person)
         for cls, conf in zip(results.boxes.cls, results.boxes.conf):
             if int(cls) == 0 and conf > 0.0:
                 image_detected = True
+                annotated_frames.append(results.plot())
                 break
+
         if image_detected:
             break
+
     cap.release()
 
-    # 3️⃣ Audio pass: extract and classify
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
-        AudioSegment.from_file(video_path).export(tmp_audio.name, format="wav")
-        audio_pred = predict_sound(tmp_audio.name)
-    # True if the predicted label is one of your defined classes
-    audio_detected = audio_pred in LABELS  
+    # 3️⃣ Audio pass: extract WAV and classify
+    audio_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    AudioSegment.from_file(vid_path).export(audio_tmp.name, format="wav")
+    audio_label = predict_sound(audio_tmp.name)
 
-    # 4️⃣ Decision logic
-    if image_detected or audio_detected:
+    # Only count as “audio_detected” if it’s one of your trained classes *and* not “scratch”
+    audio_detected = (audio_label in LABELS) and (audio_label != "scratch")
+
+
+    # 4️⃣ Display vision results
+    st.subheader("👁️ Vision Results")
+    if annotated_frames:
+        st.image(
+            annotated_frames[0],
+            caption="Detected Frame (1 fps sampling)",
+            use_column_width=True
+        )
+    else:
+        st.info("No person detected in sampled frames.")
+
+    # 5️⃣ Display audio results
+    st.subheader("🔊 Audio Results")
+    with open(audio_tmp.name, "rb") as f:
+        st.audio(f.read(), format="audio/wav")
+    st.write(f"**Predicted sound class:** {audio_label}")
+
+    # 6️⃣ Fusion logic & final verdict
+    if image_detected and audio_detected:
         st.success(
-            "🔊🔍 Person likely **alive** detected " +
-            (
-                f"(vision={'✔️' if image_detected else '❌'}, "
-                f"audio={'✔️' if audio_detected else '❌'})"
-            )
+            "✅ Person **alive** detected  " +
+            f"(vision={'✔️' if image_detected else '❌'}, audio={'✔️' if audio_detected else '❌'})"
         )
     elif image_detected and not audio_detected:
-        st.warning("🔍 Person detected visually, but **no sound** → person might be dead")
+        st.warning(
+            "👀 Person detected visually but **no valid sound** → might be dead  " +
+            f"(vision={'✔️'}, audio={'❌'})"
+        )
+    elif audio_detected and not image_detected:
+        st.info(
+            "🔊 Valid sound detected but **no person visually** → person might be alive  " +
+            f"(vision={'❌'}, audio={'✔️'})"
+        )
     else:
-        st.info("No person detected via vision or audio.")
+        st.error("🚫 No person detected via vision or valid audio.")
 
-else:
-    st.info("Upload a video file to begin analysis.")
