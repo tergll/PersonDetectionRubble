@@ -3,3 +3,10 @@ ultralytics
 opencv-python
 pillow
 numpy 
+
+torch
+librosa
+soundfile
+panns-inference
+joblib
+pydub
