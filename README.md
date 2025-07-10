@@ -44,4 +44,8 @@ A simple web app to detect people in images using YOLO and Streamlit.
 - For best compatibility, use Python 3.10 or 3.11.
 - If you encounter errors with PyTorch or YOLO, try downgrading your Python version.
 - You can switch to `yolov8s.pt` in `app.py` for higher accuracy (but slower inference). 
-- It's going to take sometime to load the PANN weights when you run app.py so be patient
+- It's going to take sometime to load  the PANN weights when you run app.py so be patient
+
+
+https://github.com/user-attachments/assets/e1fd6318-d237-4fb5-8678-405911c4f008
+
