@@ -48,23 +48,56 @@ def predict_sound(path: str) -> str:
     idx = int(sound_clf.predict(emb)[0])
     return LABELS[idx]
 
+# --- Video Helper Functions ---
+def extract_audio_from_video(video_path: str) -> str:
+    """Extract audio from video and return path to audio file"""
+    audio_path = video_path.replace('.mp4', '_audio.wav').replace('.avi', '_audio.wav').replace('.mov', '_audio.wav')
+    video = AudioSegment.from_file(video_path)
+    video.export(audio_path, format="wav")
+    return audio_path
+
+def extract_frames_from_video(video_path: str, interval_seconds: int = 1) -> list:
+    """Extract frames from video at specified interval"""
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps
+    
+    frames = []
+    frame_timestamps = []
+    
+    # Extract frames at 1-second intervals
+    for second in range(0, int(duration), interval_seconds):
+        frame_number = int(second * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        if ret:
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame_rgb)
+            frame_timestamps.append(second)
+    
+    cap.release()
+    return frames, frame_timestamps
+
 # Load YOLO model (use yolov8x.pt for best accuracy)
 model = YOLO('yolov8x.pt')
 
 # --- Streamlit UI ---
-st.title("Multimodal Detector: Image & Audio")
-st.write("Upload images and/or audio files. The app will automatically detect the file type and apply the appropriate model.")
+st.title("Multimodal Detector: Image, Audio & Video")
+st.write("Upload images, audio files, or videos. The app will automatically detect the file type and apply the appropriate model.")
 
-# Unified file uploader for both images and audio
+# Unified file uploader for images, audio, and video
 uploaded_files = st.file_uploader(
-    "Upload files (images: png, jpg, jpeg, bmp, webp | audio: wav, mp3, ogg, flac)",
-    type=["png", "jpg", "jpeg", "bmp", "webp", "wav", "mp3", "ogg", "flac"],
+    "Upload files (images: png, jpg, jpeg, bmp, webp | audio: wav, mp3, ogg, flac | video: mp4, avi, mov)",
+    type=["png", "jpg", "jpeg", "bmp", "webp", "wav", "mp3", "ogg", "flac", "mp4", "avi", "mov"],
     accept_multiple_files=True
 )
 
 # Separate lists for different file types
 image_files = []
 audio_files = []
+video_files = []
 
 # Categorize uploaded files by type
 if uploaded_files:
@@ -74,6 +107,8 @@ if uploaded_files:
             image_files.append(uploaded_file)
         elif file_type and file_type.startswith('audio/'):
             audio_files.append(uploaded_file)
+        elif file_type and file_type.startswith('video/'):
+            video_files.append(uploaded_file)
         else:
             # Fallback based on file extension
             file_extension = uploaded_file.name.lower().split('.')[-1]
@@ -81,6 +116,8 @@ if uploaded_files:
                 image_files.append(uploaded_file)
             elif file_extension in ['wav', 'mp3', 'ogg', 'flac']:
                 audio_files.append(uploaded_file)
+            elif file_extension in ['mp4', 'avi', 'mov']:
+                video_files.append(uploaded_file)
 
 # Process images if any
 image_results = []
@@ -148,6 +185,99 @@ if image_files:
             else:
                 st.warning("❌ No people detected.")
 
+# Process videos if any
+if video_files:
+    st.header("🎬 Video Analysis Results")
+    for uploaded_file in video_files:
+        with st.expander(f"Processing Video: {uploaded_file.name}", expanded=True):
+            # Save video to temp file
+            with tempfile.NamedTemporaryFile(suffix=f".{uploaded_file.name.split('.')[-1]}", delete=False) as tmp_video:
+                tmp_video.write(uploaded_file.getvalue())
+                video_path = tmp_video.name
+            
+            # Extract audio from video
+            st.write("🎵 **Extracting audio...**")
+            audio_path = extract_audio_from_video(video_path)
+            
+            # Process audio
+            pred = predict_sound(audio_path)
+            st.success(f"🎯 Audio prediction: **{pred}**")
+            
+            # Extract frames from video
+            st.write("📷 **Extracting frames...**")
+            frames, timestamps = extract_frames_from_video(video_path, interval_seconds=1)
+            
+            if frames:
+                st.write(f"📊 Extracted {len(frames)} frames at 1-second intervals")
+                
+                # Process frames with YOLO
+                frame_results = []
+                for i, (frame, timestamp) in enumerate(zip(frames, timestamps)):
+                    # Convert numpy array to PIL Image
+                    frame_pil = Image.fromarray(frame)
+                    
+                    # Save frame to temp file for YOLO
+                    with tempfile.NamedTemporaryFile(suffix=".jpg") as temp_file:
+                        frame_pil.save(temp_file.name)
+                        results = model(temp_file.name)
+                        result = results[0]
+                        
+                        # Filter boxes to only keep class 0 (person)
+                        if result.boxes is not None and len(result.boxes) > 0:
+                            person_mask = (result.boxes.cls.cpu().numpy() == 0)
+                            if person_mask.any():
+                                BoxesClass = type(result.boxes)
+                                xyxy = result.boxes.xyxy[person_mask]
+                                conf = result.boxes.conf[person_mask].unsqueeze(1)
+                                cls = result.boxes.cls[person_mask].unsqueeze(1)
+                                if hasattr(result.boxes, 'id') and result.boxes.id is not None:
+                                    id = result.boxes.id[person_mask].unsqueeze(1)
+                                    data = torch.cat([xyxy, conf, cls, id], dim=1)
+                                else:
+                                    data = torch.cat([xyxy, conf, cls], dim=1)
+                                new_boxes = BoxesClass(data, result.boxes.orig_shape)
+                                result.boxes = new_boxes
+                                max_conf = float(result.boxes.conf.max().cpu().item())
+                                has_people = True
+                            else:
+                                result.boxes = None
+                                max_conf = 0.0
+                                has_people = False
+                        else:
+                            max_conf = 0.0
+                            has_people = False
+                        
+                        # Render frame with only person boxes
+                        result_img = result.plot()
+                        result_img_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
+                        result_pil = Image.fromarray(result_img_rgb)
+                        
+                        frame_results.append({
+                            "timestamp": timestamp,
+                            "has_people": has_people,
+                            "max_conf": max_conf,
+                            "result_image": result_pil
+                        })
+                
+                # Sort frame results by confidence
+                frame_results.sort(key=lambda x: x["max_conf"], reverse=True)
+                
+                # Display frame results
+                st.write("🎬 **Frame Analysis Results (Ranked by Confidence):**")
+                for i, result in enumerate(frame_results):
+                    with st.expander(f"Frame at {result['timestamp']}s (Confidence: {result['max_conf']*100:.1f}%)", expanded=False):
+                        st.image(result["result_image"], caption=f"Frame at {result['timestamp']}s", use_container_width=True)
+                        if result["has_people"]:
+                            st.success(f"✅ People detected at {result['timestamp']}s! Confidence: {result['max_conf']*100:.1f}%")
+                        else:
+                            st.warning(f"❌ No people detected at {result['timestamp']}s")
+            else:
+                st.error("❌ Could not extract frames from video")
+            
+            # Clean up temp files
+            os.unlink(video_path)
+            os.unlink(audio_path)
+
 # Process audio files if any
 audio_results = []
 if audio_files:
@@ -170,7 +300,7 @@ if audio_files:
             })
 
 # Summary section
-if image_results or audio_results:
+if image_results or audio_results or video_files:
     st.header("📊 Summary")
     
     if image_results:
@@ -184,16 +314,23 @@ if image_results or audio_results:
         st.subheader("Audio Analysis Summary")
         for result in audio_results:
             st.write(f"**{result['filename']}**: 🎵 {result['prediction']}")
+    
+    if video_files:
+        st.subheader("Video Analysis Summary")
+        for video_file in video_files:
+            st.write(f"**{video_file.name}**: 🎬 Video processed (audio + frames)")
 
 # Show file type breakdown
 if uploaded_files:
     st.sidebar.header("📁 File Breakdown")
     st.sidebar.write(f"📷 Images: {len(image_files)}")
     st.sidebar.write(f"🎵 Audio: {len(audio_files)}")
+    st.sidebar.write(f"📹 Videos: {len(video_files)}")
     st.sidebar.write(f"📄 Total: {len(uploaded_files)}")
 
 else:
-    st.info("👆 Please upload images and/or audio files to begin analysis.")
+    st.info("👆 Please upload images, audio files, or videos to begin analysis.")
     st.write("**Supported formats:**")
     st.write("• **Images:** PNG, JPG, JPEG, BMP, WebP")
     st.write("• **Audio:** WAV, MP3, OGG, FLAC")
+    st.write("• **Video:** MP4, AVI, MOV")
