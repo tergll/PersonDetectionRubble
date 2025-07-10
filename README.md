@@ -16,7 +16,7 @@ A simple web app to detect people in images using YOLO and Streamlit.
 
 2. **Download the YOLO model weights** (if not already present):
    ```bash
-   curl -L -o yolov8n.pt https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+   curl -L -o yolov8x.pt https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt
    ```
 
 3. **(For Audio Setup)** *You have to do both anyways XD*
